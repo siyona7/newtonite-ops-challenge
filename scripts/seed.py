@@ -6,15 +6,16 @@ Run after database is up and migrations are applied.
 import asyncio
 import random
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 
 from app.db.session import AsyncSessionLocal
 from app.models.user import User, TeamMember, Role
 from app.models.team import Team
 from app.models.item import Item, ItemType, Priority, Status
 from app.models.event import Event, EventType
+from app.models.outbox import OutboxMessage
 
 
 # Sample data for realistic seeding
@@ -112,7 +113,7 @@ async def create_items_batch(
 
         for _ in range(batch_count):
             # Random date within the last 90 days
-            created_at = datetime.utcnow() - timedelta(
+            created_at = datetime.now(timezone.utc) - timedelta(
                 days=random.randint(0, 90),
                 hours=random.randint(0, 23),
                 minutes=random.randint(0, 59)
@@ -127,7 +128,7 @@ async def create_items_batch(
                 priority=random.choice(priorities),
                 status=random.choice(statuses),
                 version=random.randint(1, 5),
-                metadata={"source": "seed", "batch": created // batch_size},
+                extra={"source": "seed", "batch": created // batch_size},
                 created_at=created_at,
                 updated_at=created_at,
             )
@@ -170,11 +171,34 @@ async def get_item_ids(session: AsyncSession, limit: int = 1000) -> list[uuid.UU
     return [row[0] for row in result.all()]
 
 
+async def report_counts(session: AsyncSession) -> None:
+    """Report final row counts for all tables."""
+    counts = {}
+
+    for model in [Team, User, TeamMember, Item, Event, OutboxMessage]:
+        result = await session.execute(func.count(model.id))
+        counts[model.__tablename__] = result.scalar()
+
+    print("\n=== Final Row Counts ===")
+    for table, count in counts.items():
+        print(f"{table}: {count:,}")
+    print("========================\n")
+
+
 async def main():
     """Main seeding function."""
     print("Starting database seeding...")
 
     async with AsyncSessionLocal() as session:
+        # Check if data already exists
+        team_count_result = await session.execute(func.count(Team.id))
+        team_count = team_count_result.scalar()
+
+        if team_count > 0:
+            print(f"Database already contains data (teams: {team_count}). Skipping seeding.")
+            await report_counts(session)
+            return
+
         # Create teams
         team_ids = await create_teams(session, count=5)
 
@@ -187,6 +211,9 @@ async def main():
         # Get sample item IDs and create events
         item_ids = await get_item_ids(session, limit=1000)
         await create_events_sample(session, item_ids, user_ids)
+
+        # Report final counts
+        await report_counts(session)
 
     print("Seeding complete!")
 
