@@ -35,6 +35,23 @@ An internal web application for teams to create and manage operational work item
    Then edit `.env` with your actual database credentials.
 
 4. **Set up PostgreSQL**:
+
+   **Option A: Using Docker Compose (Recommended)**
+   ```powershell
+   # Start PostgreSQL container
+   docker-compose up -d
+
+   # Wait for database to be ready (check healthcheck)
+   docker-compose logs postgres
+
+   # Run database migrations
+   uv run alembic upgrade head
+
+   # Seed the database with test data (50,000 items)
+   uv run python scripts/seed.py
+   ```
+
+   **Option B: Local PostgreSQL**
    - Ensure PostgreSQL is running locally
    - Create a database:
      ```powershell
@@ -42,6 +59,8 @@ An internal web application for teams to create and manage operational work item
      psql -U postgres -c "CREATE DATABASE ops_challenge;"
      ```
    - Update `DATABASE_URL` in `.env` to match your PostgreSQL credentials
+   - Run migrations: `uv run alembic upgrade head`
+   - Seed data: `uv run python scripts/seed.py`
 
 ## Running the Application
 
@@ -93,12 +112,49 @@ Expected response:
 
 ## Docker (Optional)
 
-Docker Compose is available for containerized deployments:
+Docker Compose is available for containerized deployments.
+
+### PowerShell Commands for Docker Setup
+
+Once Docker Desktop is installed and running:
+
 ```powershell
+# 1. Copy environment variables template
+Copy-Item .env.example .env
+
+# 2. Start PostgreSQL container
 docker-compose up -d
+
+# 3. Wait for database to be ready (check healthcheck logs)
+docker-compose logs postgres
+
+# 4. Run database migrations
+uv run alembic upgrade head
+
+# 5. Seed the database with test data (50,000 items)
+uv run python scripts/seed.py
+
+# 6. Start the application
+uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Note: Docker is not required for local development.
+### Docker Commands
+
+```powershell
+# View container logs
+docker-compose logs postgres
+
+# Stop containers
+docker-compose down
+
+# Stop and remove volumes (deletes all data)
+docker-compose down -v
+
+# Restart containers
+docker-compose restart
+```
+
+Note: Docker is not required for local development but is recommended for consistent database setup.
 
 ## Project Structure
 
@@ -106,13 +162,29 @@ Note: Docker is not required for local development.
 newtonite-ops-challenge/
 ├── app/                # Application source code
 │   ├── main.py        # FastAPI application entry point
-│   └── config.py      # Configuration settings
+│   ├── config.py      # Configuration settings
+│   ├── db/            # Database configuration
+│   │   ├── base.py    # SQLAlchemy base model
+│   │   └── session.py # Async session management
+│   └── models/        # SQLAlchemy ORM models
+│       ├── user.py    # User, TeamMember models
+│       ├── team.py    # Team model
+│       ├── item.py    # Item model with enums
+│       ├── event.py   # Event model
+│       └── outbox.py  # Outbox message model
 ├── tests/             # Test suite
 │   └── test_health.py # Health endpoint tests
+├── scripts/           # Utility scripts
+│   └── seed.py        # Database seeding script
+├── alembic/           # Database migrations
+│   ├── versions/      # Migration files
+│   └── env.py         # Alembic environment config
 ├── docs/              # Documentation
 │   └── STUDY_NOTES.md # Phase-by-phase learning notes
 ├── .env.example       # Environment variables template
 ├── .gitignore         # Git ignore rules
+├── docker-compose.yml # Docker Compose configuration
+├── Dockerfile         # Docker image definition
 ├── pyproject.toml     # Project dependencies and metadata
 └── README.md          # This file
 ```
