@@ -61,8 +61,8 @@ class Item(Base):
     priority: Mapped[Priority] = mapped_column(String, nullable=False, default=Priority.MEDIUM)
     status: Mapped[Status] = mapped_column(String, nullable=False, default=Status.OPEN, index=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    # Metadata for filtering and search
-    metadata: Mapped[dict] = mapped_column(JSONB, nullable=True, default=dict)
+    # Extra metadata for filtering and search (column name is 'metadata' in DB)
+    extra: Mapped[dict] = mapped_column("metadata", JSONB, nullable=True, default=dict)
     # Full-text search vector will be added via migration
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
