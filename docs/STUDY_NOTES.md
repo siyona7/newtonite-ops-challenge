@@ -195,3 +195,36 @@ A: A centralized permission matrix is easier to maintain and audit. When adding 
 - File: `app/routers/auth.py`
 - Change: Change `httponly=True` to `httponly=False` in the `response.set_cookie()` call
 - Result: The authentication will still work, but the security test (if added) would fail because the cookie is accessible to JavaScript
+
+
+## Phase 4 & 5: Work Items CRUD, Concurrency Protection, Idempotency, Workflow & Comments
+
+### What Was Built
+
+**Items Router** (`app/routers/items.py`)
+- `POST /items`: Create work item with optional `Idempotency-Key` header, append-only `CREATED` event, and transactional outbox message.
+- `GET /items`: Paginated item listing with filtering (by `team_id`, `status`, `priority`, `type`, `owner_id`), keyword search (`q`), and total count.
+- `GET /items/{item_id}`: Fetch single item by UUID with `ETag` version header and team access check.
+- `PATCH /items/{item_id}`: Optimistic concurrency control via `If-Match` header (or request body version). Returns `412 Precondition Failed` on stale edits; logs `UPDATED` event on success.
+- `POST /items/{item_id}/claim`: Atomic race-free ownership assignment with conditional `UPDATE ... WHERE owner_id IS NULL`. Returns `409 Conflict` if already claimed; logs `CLAIMED` event and outbox event.
+- `POST /items/{item_id}/transition`: State machine validation against `VALID_TRANSITIONS` graph. Transitions to `APPROVED` strictly require `Role.LEAD` or `Role.ADMIN` (`Action.APPROVE`); creates notifications and `STATUS_CHANGED` events.
+- `POST /items/{item_id}/comments`: Add comments with item owner notification and event audit record.
+- `GET /items/{item_id}/comments`: Retrieve comment thread in chronological order.
+- `GET /items/{item_id}/history`: Retrieve complete append-only audit trail.
+
+**Test Suite** (`tests/test_items_behaviors.py`)
+- `test_create_item_and_idempotency`: Validates item creation and replay on duplicate `Idempotency-Key`.
+- `test_stale_edit_protection`: Validates `If-Match` header and `412 Precondition Failed` on stale versions.
+- `test_workflow_status_transitions`: Validates state transition graph and rejection of illegal status jumps.
+- `test_atomic_claim`: Validates race-free claim and idempotent re-claim.
+- `test_add_comment_and_history`: Validates comment creation, retrieval, and append-only event trail.
+- `test_server_side_authorization_forbidden`: Validates HTTP 403 Forbidden when user role lacks action permissions.
+- `test_server_side_authorization_cross_team_404`: Validates HTTP 404 Not Found when cross-team resource access is attempted.
+
+### Why This Approach
+
+- **Conditional UPDATE for Atomic Claim**: Single query execution (`WHERE owner_id IS NULL`) avoids race conditions without distributed Redis locks or heavy table locks.
+- **Optimistic Concurrency Control (OCC)**: `version` counter and standard HTTP `If-Match` / `ETag` headers protect against lost updates when multiple operators view and edit items simultaneously.
+- **Database Idempotency**: Storing serialized response payloads in `idempotency_keys` ensures network retries produce identical responses without duplicating side effects.
+- **Strict State Machine**: Explicit status transition dictionary prevents invalid states (e.g., closing unreviewed tasks directly without proper workflow stages).
+
