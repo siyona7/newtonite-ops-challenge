@@ -8,6 +8,9 @@ from app.models import (
     Item,
     Event,
     OutboxMessage,
+    IdempotencyKey,
+    Comment,
+    Notification,
 )
 
 
@@ -20,6 +23,9 @@ def test_models_import():
     assert Item is not None
     assert Event is not None
     assert OutboxMessage is not None
+    assert IdempotencyKey is not None
+    assert Comment is not None
+    assert Notification is not None
 
 
 def test_table_metadata():
@@ -43,9 +49,28 @@ def test_table_metadata():
     assert hasattr(OutboxMessage, "__tablename__")
     assert OutboxMessage.__tablename__ == "outbox_messages"
 
+    assert hasattr(IdempotencyKey, "__tablename__")
+    assert IdempotencyKey.__tablename__ == "idempotency_keys"
+
+    assert hasattr(Comment, "__tablename__")
+    assert Comment.__tablename__ == "comments"
+
+    assert hasattr(Notification, "__tablename__")
+    assert Notification.__tablename__ == "notifications"
+
 
 def test_base_metadata():
     """Test that Base metadata includes all model tables."""
     table_names = {table.name for table in Base.metadata.tables.values()}
-    expected_tables = {"users", "teams", "team_members", "items", "events", "outbox_messages"}
+    expected_tables = {
+        "users",
+        "teams",
+        "team_members",
+        "items",
+        "events",
+        "outbox_messages",
+        "idempotency_keys",
+        "comments",
+        "notifications",
+    }
     assert table_names == expected_tables

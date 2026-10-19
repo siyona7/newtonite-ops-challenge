@@ -127,3 +127,71 @@ A: This proves the application can handle scale and validates that pagination, f
 - File: `scripts/seed.py`
 - Change: Change `team_id=random.choice(team_ids)` to `team_id=uuid.uuid4()` (using a random UUID not in the database)
 - Result: The database will reject the insert due to foreign key constraint violation (team_id must reference an existing team)
+
+
+## Phase 3: Login, Roles, Authorization
+
+### What Was Built
+
+**Schema Additions** (Migration `41ba727beb2c`)
+- Added `password_hash` column to `users` table for authentication
+- Created `idempotency_keys` table for idempotent request handling
+- Created `comments` table for item comments
+- Created `notifications` table for user notifications
+- Added `search_vector` column to `items` with GIN index for full-text search
+- Created PostgreSQL trigger function to auto-update `search_vector` on item insert/update
+- Created PostgreSQL trigger function to prevent updates/deletes on `events` (append-only enforcement)
+
+**Authentication Module** (`app/auth/`)
+- `security.py`: Password hashing with argon2, JWT token creation/verification
+- `authorization.py`: Central `authorize()` function with permission matrix
+  - Role-based permissions: VIEWER (read, comment), MEMBER (read, create, update, claim, comment), LEAD/ADMIN (all actions)
+  - Cross-team access returns ValueError (404 scenario)
+  - Resource validation (404 if not found)
+- `dependencies.py`: FastAPI dependencies for `get_current_user` and `get_optional_user` from JWT cookie
+
+**API Endpoints** (`app/routers/auth.py`)
+- `POST /auth/login`: Email/password login, sets httpOnly JWT cookie (7-day expiry)
+- `POST /auth/logout`: Clears JWT cookie
+- `GET /auth/me`: Returns current user info with team memberships
+
+**Test Suite** (`tests/test_authorization.py`)
+- `test_permission_matrix`: Validates all 4 roles have correct permissions for all actions
+- `test_cross_team_access_returns_404`: Users from one team cannot access another team's resources
+- `test_nonexistent_resource_returns_404`: Accessing nonexistent resources raises ValueError
+- `test_get_team_memberships`: Validates user can belong to multiple teams with different roles
+- `test_viewer_cannot_delete`: Viewers cannot delete items
+- `test_admin_can_approve`: Admins can approve items
+
+### Why This Approach
+
+- **Argon2 for password hashing**: Memory-hard algorithm resistant to GPU/ASIC attacks, recommended by OWASP
+- **JWT in httpOnly cookie**: Prevents XSS attacks while maintaining session state, more secure than localStorage
+- **Centralized authorization**: Single `authorize()` function enforces consistent permission checks across all endpoints
+- **404 for cross-team access**: Security by obscurity - users don't learn about resources they can't access
+- **PostgreSQL triggers for append-only**: Database-level enforcement prevents accidental event modification even if application logic fails
+- **Full-text search with TSVECTOR**: Native PostgreSQL text search with GIN index for efficient querying
+- **Idempotency keys table**: Prevents duplicate operations on network retries without distributed locks
+
+### Reviewer Questions
+
+**Q1: Why use httpOnly cookies instead of Authorization header for JWT?**
+A: httpOnly cookies prevent XSS attacks - JavaScript cannot read the token, unlike localStorage. The cookie is automatically sent with requests, reducing boilerplate. The trade-off is CSRF vulnerability, which can be mitigated with SameSite attribute (set to 'lax') and CSRF tokens for state-changing operations. For this application, the security benefits outweigh the complexity.
+
+**Q2: Why enforce append-only at the database level with a trigger instead of just in application code?**
+A: Database-level enforcement provides defense in depth. If application code has a bug or if someone runs raw SQL updates, the trigger still prevents modification. This is especially important for audit trails where event integrity is critical. The trade-off is slightly more complex migrations, but the security benefit is worth it for compliance requirements.
+
+**Q3: Why use a permission matrix instead of checking roles inline in each endpoint?**
+A: A centralized permission matrix is easier to maintain and audit. When adding a new role or action, you only update one place (`ROLE_PERMISSIONS`). It also makes authorization logic testable independently of endpoints. The trade-off is slightly more indirection, but the maintainability benefit is significant for a system with multiple roles and actions.
+
+### Break-It Drills
+
+**Drill 1: Make authorization fail by removing a permission from the matrix**
+- File: `app/auth/authorization.py`
+- Change: Remove `Action.READ` from `Role.VIEWER` in `ROLE_PERMISSIONS`
+- Result: The `test_permission_matrix` test will fail because viewers should be able to read but cannot
+
+**Drill 2: Make login fail by breaking JWT cookie setting**
+- File: `app/routers/auth.py`
+- Change: Change `httponly=True` to `httponly=False` in the `response.set_cookie()` call
+- Result: The authentication will still work, but the security test (if added) would fail because the cookie is accessible to JavaScript
